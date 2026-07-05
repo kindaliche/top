@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>TOP | 20260705 rrx </title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; background-color: #121212; color: #ffffff; }
+        input { width: 100%; padding: 12px; background-color: #1e1e1e; color: #ffffff; border: 1px solid #333; border-radius: 4px; box-sizing: border-box; }
+        .name-wrapper { display: inline-block; width: 110px; margin-right: 15px; vertical-align: middle; }
+        .warning { color: #ff6b6b; margin: 10px 0; font-weight: bold; }
+        .info-msg { color: #4dabf7; margin: 10px 0; font-size: 0.9em; font-style: italic; }
+        .enemy-header { font-size: 1.6em; font-weight: bold; margin-top: 30px; color: #ffffff; }
+        .enemy-sub { font-size: 0.6em; color: #888888; margin-left: 5px; }
+        .bar-track { display: inline-block; width: 240px; height: 20px; background-color: #2a2a2a; border-radius: 4px; vertical-align: middle; overflow: hidden; }
+        .bar-fill { display: block; height: 100%; background-color: #4dabf7; border-radius: 4px; }
+        .bar-score { margin-left: 10px; font-size: 0.95em; font-weight: bold; color: #cccccc; vertical-align: middle; }
+        .result-row { margin: 12px 0; display: block; }
+        .filter-bar { margin: 14px 0 4px; }
+        .filter-btn { padding: 8px 14px; background-color: #1e1e1e; color: #cccccc; border: 1px solid #333; border-radius: 4px; cursor: pointer; font-size: 0.95em; font-weight: bold; }
+        .filter-btn:hover { background-color: #2a2a2a; }
+        .filter-btn.active { background-color: #4dabf7; color: #ffffff; border-color: #4dabf7; }
+        .filter-bar { gap: 6px; }
+        hr { border: 0; border-top: 1px solid #444; margin: 30px 0; }
+        h2 { font-size: 1.5em; color: #ffffff; }
+        .data-status { margin: 0; font-size: 0.85em; color: #4dabf7; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .data-status.fresh { color: #51cf66; }
+        .data-status.stale { color: #ffa94d; }
+        .spinner { width: 13px; height: 13px; border: 2px solid #4dabf7; border-top-color: transparent; border-radius: 50%; display: inline-block; animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .first-load { margin: 20px 0; color: #888; display: flex; align-items: center; gap: 10px; font-size: 1.05em; }
+    </style>
+</head>
+<body>
+
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+    <h1 style="margin: 0;">탑 후픽 추천받아요</h1>
+    <div id="dataStatus" class="data-status"></div>
+</div>
+<div style="display: flex; gap: 8px; margin-top: 14px;">
+    <input type="text" id="enemyInput" placeholder="예: 가렌 다리우스 ㄹㄴㅌ" autocomplete="off" style="flex: 1;">
+    <div class="filter-bar" style="margin: 0; display: flex; flex-shrink: 0;">
+        <button class="filter-btn active" data-filter="ALL">ALL</button>
+        <button class="filter-btn" data-filter="AD">AD</button>
+        <button class="filter-btn" data-filter="AP">AP</button>
+    </div>
+</div>
+<div id="infoArea" class="info-msg"></div>
+<div id="warningArea" class="warning"></div>
+<div id="results"></div>
+
+<script>
+// =============================================================================================
+// 1. 데이터 및 설정
+// =============================================================================================
+// my_champions 는 이제 CSV 헤더에서 자동으로 읽어온다. (아래 loadChampionsFromHeader 참고)
+// 규칙: 헤더 첫 칸(빈 공백) 다음부터, 처음 빈 칸을 만나기 전까지가 내 챔프 이름 블록.
+//       그 블록을 반으로 나눠 앞 절반 = AD, 뒤 절반 = AP.
+let my_champions = { "AD": [], "AP": [] };
+let my_full_pool = [];
+
+const enemy_champions = [
+    // 주류
+    "가렌", "갱플랭크", "그라가스", "그웬",
+    "나르", "나서스",
+    "다리우스",
+    "라이즈", "럼블", "레넥톤", "렝가", "리븐",
+    "마오카이", "말파이트", "모데카이저", "문도",
+    "바루스", "베인", "볼리베어", "블라디미르", "뽀삐",
+    "사이온", "사일러스", "세주아니", "세트", "쉔", "스웨인", "스카너", "신지드", "신짜오",
+    "아칼리", "아트록스", "암베사", "애니비아", "야스오", "오공", "오로라", "오른",
+    "올라프", "요네", "요릭", "우디르", "우르곳", "워윅", "이렐리아", "일라오이",
+    "자크", "자헨", "잭스", "제이스",
+    "초가스",
+    "카밀", "카시오페아", "케넨", "케일", "퀸", "크산테", "클레드",
+    "탐켄치", "트런들", "트린다미어", "티모",
+    "판테온", "피오라",
+    "하이머딩거",
+
+    // 비주류 (픽률은 낮아도 어쩌다 나오긴 나오는)
+    "나피리", "녹턴", "니달리",
+    "렉사이", "룰루", "리신",
+    "비에고",
+    "쉬바나", "스몰더",
+    "아크샨",
+    "제드",
+    "카르마", "카이사",
+    "트페",
+    "피들스틱"
+];
+
+let banData = {};
+let preference = {}; 
+let globalMax = 1; // 시트 전체에서 나올 수 있는 실제 최고점 (base × pref). CSV 로드 후 자동 계산.
+
+// 헤더에서 내 챔프 이름을 자동 추출 -> my_champions / my_full_pool 세팅
+function loadChampionsFromHeader(headers) {
+    // headers[0] 은 앞 공백. [1]부터 빈 칸(분석열 시작) 전까지가 챔프 이름.
+    let names = [];
+    for (let i = 1; i < headers.length; i++) {
+        let h = headers[i] ? headers[i].trim() : "";
+        if (h === "") break;            // 첫 빈 칸에서 이름 블록 종료
+        names.push(h);
+    }
+    // 반으로 나눠 앞 절반 AD, 뒤 절반 AP
+    let half = Math.floor(names.length / 2);
+    my_champions = { "AD": names.slice(0, half), "AP": names.slice(half, half * 2) };
+    my_full_pool = [...my_champions.AD, ...my_champions.AP];
+}
+
+// -------- 데이터 소스 설정 --------
+// 구글시트를 CSV로 바로 뱉는 export 링크. 시트에서 숫자만 고치면 사이트가 자동으로 최신을 읽음.
+// (시트 공유가 "링크가 있는 모든 사용자 - 뷰어" 이상으로 열려 있어야 브라우저가 읽을 수 있음)
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/17e63nOTJLiF371qi4AgC-XxmaWxf-Sx1RLyUU6YfHMQ/export?format=csv&gid=0";
+const CACHE_KEY = "topPickCsvCache_v1";
+const CACHE_TIME_KEY = "topPickCsvCacheTime_v1";
+
+// CSV 2차원 배열을 받아 banData/preference/globalMax/my_champions 를 채움
+function applyParsed(data) {
+    if (!data || data.length < 1) throw new Error("빈 CSV");
+    const headers = data[0].map(h => h ? h.trim() : "");
+
+    loadChampionsFromHeader(headers);  // 헤더에서 내 챔프 자동 로드
+
+    banData = {};
+    preference = {};
+
+    for (let i = 1; i < data.length; i++) {
+        const firstCol = data[i][0] ? data[i][0].trim() : "";
+        if (firstCol.includes("선호도")) {
+            my_full_pool.forEach(name => {
+                const idx = headers.indexOf(name);
+                if (idx !== -1) {
+                    let val = parseFloat(data[i][idx]);
+                    preference[name] = isNaN(val) ? 1.0 : val;
+                }
+            });
+        }
+    }
+    for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const firstCol = row[0] ? row[0].trim() : "";
+        if (enemy_champions.includes(firstCol)) {
+            banData[firstCol] = {};
+            my_full_pool.forEach(name => {
+                const idx = headers.indexOf(name);
+                if (idx !== -1) {
+                    let val = parseFloat(row[idx]);
+                    if (!isNaN(val)) banData[firstCol][name] = val;
+                }
+            });
+        }
+    }
+
+    globalMax = 1;
+    for (let enemy in banData) {
+        for (let name in banData[enemy]) {
+            let pref = preference[name] || 1.0;
+            let val = banData[enemy][name] * pref;
+            if (val > globalMax) globalMax = val;
+        }
+    }
+
+    if (Object.keys(banData).length === 0) throw new Error("적 챔프 데이터 없음");
+}
+
+// 하단 상태 표시 --------------------------------------------------------------
+function setStatusLoading() {
+    const el = document.getElementById('dataStatus');
+    el.className = "data-status";
+    el.innerHTML = `<span class="spinner"></span> 최신 데이터 받아오는 중…`;
+}
+function fmtTime(iso) {
+    const d = new Date(iso);
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function setStatusFresh(iso) {
+    const el = document.getElementById('dataStatus');
+    el.className = "data-status fresh";
+    el.innerText = `✓ 최신 데이터 (갱신: ${fmtTime(iso)})`;
+}
+function setStatusStale(iso) {
+    const el = document.getElementById('dataStatus');
+    el.className = "data-status stale";
+    el.innerText = iso
+        ? `⚠ 시트를 못 불러와 저장된 데이터로 표시 중 (마지막 갱신: ${fmtTime(iso)})`
+        : `⚠ 데이터를 불러오지 못했습니다. 인터넷/시트 공개 설정을 확인하세요.`;
+}
+function showFirstLoadSpinner() {
+    // 저장분이 아예 없는 최초 1회에만, 결과영역에 스피너 표시
+    document.getElementById('results').innerHTML =
+        `<div class="first-load"><span class="spinner"></span> 데이터 받아오는 중…</div>`;
+}
+
+// 저장된 캐시로 즉시 복구 (열자마자 바로 검색 가능하게) -> 성공 시 true
+function loadFromCache() {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (!cached) return false;
+        const parsed = Papa.parse(cached, { skipEmptyLines: false });
+        applyParsed(parsed.data);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 구글시트에서 최신 받아오기
+function fetchLatest() {
+    setStatusLoading();  // "받아오는 중…" 계속 표시
+    const url = SHEET_CSV_URL + "&_=" + Date.now();  // 캐시 우회
+    Papa.parse(url, {
+        download: true,
+        complete: function(results) {
+            try {
+                applyParsed(results.data);
+                const now = new Date().toISOString();
+                try {
+                    localStorage.setItem(CACHE_KEY, Papa.unparse(results.data));
+                    localStorage.setItem(CACHE_TIME_KEY, now);
+                } catch (e) {}
+                setStatusFresh(now);
+                render();  // 최신으로 결과 갈아끼움 (검색어 유지)
+            } catch (e) {
+                handleFetchFail();
+            }
+        },
+        error: handleFetchFail
+    });
+}
+
+function handleFetchFail() {
+    const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
+    // 캐시가 이미 로드돼 있으면 그대로 두고 상태만 표시
+    if (Object.keys(banData).length > 0) {
+        setStatusStale(cachedTime);
+    } else if (loadFromCache()) {
+        setStatusStale(cachedTime);
+        render();
+    } else {
+        setStatusStale(null);
+        document.getElementById('results').innerHTML = "";
+    }
+}
+
+// 초기 실행: 저장분 있으면 즉시 표시(대기 0), 없으면 최초 스피너. 그 위에 최신 덮어씀.
+function initData() {
+    const hasCache = loadFromCache();
+    if (hasCache) {
+        render();  // 저장분으로 바로 렌더 (검색 즉시 가능)
+    } else {
+        showFirstLoadSpinner();  // 진짜 데이터 0일 때만 스피너
+    }
+    fetchLatest();
+}
+
+// =============================================================================================
+// 2. 한영 변환 및 초성 분해 로직 (추가/강화)
+// =============================================================================================
+const CHOSUNG_LIST = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+const COMPLEX_CONSONANTS = { "ㄳ": "ㄱㅅ", "ㄵ": "ㄴㅈ", "ㄶ": "ㄴㅎ", "ㄺ": "ㄹㄱ", "ㄻ": "ㄹㅁ", "ㄼ": "ㄹㅂ", "ㄽ": "ㄹㅅ", "ㄾ": "ㄹㅌ", "ㄿ": "ㄹㅍ", "ㅀ": "ㄹㅎ", "ㅄ": "ㅂㅅ" };
+
+// 영타 -> 한타 매핑 테이블 (Qwerty to 2-Bulsik)
+const ENG_TO_KOR = {
+    'q':'ㅂ','w':'ㅈ','e':'ㄷ','r':'ㄱ','t':'ㅅ','y':'ㅛ','u':'ㅕ','i':'ㅑ','o':'ㅐ','p':'ㅔ',
+    'a':'ㅁ','s':'ㄴ','d':'ㅇ','f':'ㄹ','g':'ㅎ','h':'ㅗ','j':'ㅓ','k':'ㅏ','l':'ㅣ',
+    'z':'ㅋ','x':'ㅌ','c':'ㅊ','v':'ㅍ','b':'ㅠ','n':'ㅜ','m':'ㅡ'
+};
+
+function engToKor(text) {
+    return text.split('').map(c => ENG_TO_KOR[c.toLowerCase()] || c).join('');
+}
+
+function decompose_input(text) {
+    let result = "";
+    for (let char of text) { result += COMPLEX_CONSONANTS[char] || char; }
+    return result;
+}
+
+function get_chosung(word) {
+    let res = "";
+    for (let char of word) {
+        if (char >= "가" && char <= "힣") {
+            let code = char.charCodeAt(0) - 44032;
+            res += CHOSUNG_LIST[Math.floor(code / 588)];
+        } else res += char;
+    }
+    return res;
+}
+
+// =============================================================================================
+// 3. 입력 처리 (영타 자동 변환 포함)
+// =============================================================================================
+function resolve_input(user_input) {
+    user_input = user_input.trim();
+    if (!user_input) return { name: null, isEng: false };
+
+    // 영어 포함 여부 확인
+    const isEng = /[a-zA-Z]/.test(user_input);
+    const converted = isEng ? engToKor(user_input) : user_input;
+
+    // 1. 완성형 대조
+    if (enemy_champions.includes(converted)) return { name: converted, isEng };
+
+    // 2. 초성 대조 (분해 로직 적용)
+    const decomposed = decompose_input(converted);
+    for (let champ of enemy_champions) {
+        if (get_chosung(champ) === decomposed) return { name: champ, isEng };
+    }
+
+    return { name: null, isEng };
+}
+
+// =============================================================================================
+// 4. 공통 함수 (별점, 색상)
+// =============================================================================================
+function score_to_bar(score, champ) {
+    // 절대 스케일: 시트 전체 실측 최고점(globalMax)을 100%로 잡아 막대 길이 결정.
+    // 다 짧으면 "좋은 픽 없음"이 길이로 드러남.
+    let pct = Math.min(100, Math.round((score / globalMax) * 100));
+    let fillColor = my_champions.AD.includes(champ) ? "#D32F2F" : "#1976D2";
+    return `<span class="bar-track"><span class="bar-fill" style="width:${pct}%; background-color:${fillColor}"></span></span><span class="bar-score">${score.toFixed(1)}</span>`;
+}
+
+function colorize(champ) {
+    const isAD = my_champions.AD.includes(champ);
+    const bgColor = isAD ? "#D32F2F" : "#1976D2";
+    return `<span style="display: inline-block; width: 80px; background-color: ${bgColor}; color: #ffffff; padding: 4px 10px; border-radius: 4px; font-weight: bold; text-align: center;">${champ}</span>`;
+}
+
+// =============================================================================================
+// 5. 메인 로직
+// =============================================================================================
+const inputEl = document.getElementById('enemyInput');
+const resultEl = document.getElementById('results');
+const warningEl = document.getElementById('warningArea');
+const infoEl = document.getElementById('infoArea');
+const filterBtns = document.querySelectorAll('.filter-btn');
+
+let currentFilter = "ALL";   // "ALL" | "AD" | "AP"
+let currentEnemies = [];     // 마지막으로 해석된 적 챔프 목록 (필터 전환 시 재사용)
+
+// 현재 필터에 맞는 내 챔프 풀 반환
+function pool_for_filter() {
+    if (currentFilter === "AD") return my_champions.AD;
+    if (currentFilter === "AP") return my_champions.AP;
+    return my_full_pool;
+}
+
+// enemies + currentFilter 기준으로 결과를 그림 (입력/버튼 양쪽에서 공통 호출)
+function render() {
+    const pool = pool_for_filter();
+
+    if (currentEnemies.length === 0) { resultEl.innerHTML = ""; return; }
+
+    let html = "<hr><h2>챔프별 카운터 추천</h2>";
+    currentEnemies.forEach(e => {
+        html += `<div class="enemy-header">${e} <span class="enemy-sub">에게는요...</span></div>`;
+        let matchUps = banData[e];
+        if (matchUps) {
+            let scores = [];
+            pool.forEach(name => {
+                let base = matchUps[name];
+                if (base > 0) {
+                    let pref = preference[name] || 1.0;
+                    let final = base * pref; 
+                    scores.push({ name, final, pref });
+                }
+            });
+            
+            scores.sort((a, b) => {
+                if (Math.abs(b.final - a.final) > 0.001) return b.final - a.final;
+                return b.pref - a.pref;
+            });
+            
+            if (scores.length === 0) {
+                html += `<div class="result-row" style="color:#888;">해당 타입 추천 없음</div>`;
+            }
+            scores.slice(0, 5).forEach(item => {
+                html += `<div class="result-row">
+                            <span class="name-wrapper">${colorize(item.name)}</span>
+                            <span class="stars">${score_to_bar(item.final, item.name)}</span>
+                         </div>`;
+            });
+        }
+    });
+
+    if (currentEnemies.length > 1) {
+        html += "<hr><h2>공통 카운터 추천</h2>";
+        let common = [];
+        pool.forEach(name => {
+            let sum = 0, count = 0;
+            for (let e of currentEnemies) {
+                if (banData[e]?.[name]) { sum += banData[e][name]; count++; }
+            }
+            if (count === currentEnemies.length) {
+                let avg = sum / count;
+                let pref = preference[name] || 1.0;
+                let final = avg * pref;
+                common.push({ name, final, pref });
+            }
+        });
+        
+        common.sort((a, b) => {
+            if (Math.abs(b.final - a.final) > 0.001) return b.final - a.final;
+            return b.pref - a.pref;
+        });
+        
+        if (common.length === 0) {
+            html += `<div class="result-row" style="color:#888;">해당 타입 공통 추천 없음</div>`;
+        }
+        common.slice(0, 5).forEach(item => {
+            html += `<div class="result-row">
+                        <span class="name-wrapper">${colorize(item.name)}</span>
+                        <span class="stars">${score_to_bar(item.final, item.name)}</span>
+                     </div>`;
+        });
+    }
+    resultEl.innerHTML = html;
+}
+
+// 입력 해석: 적 챔프 목록과 경고/안내 갱신 후 render 호출
+inputEl.addEventListener('input', (e) => {
+    const raw_inputs = e.target.value.split(/\s+/).filter(x => x.trim());
+    let enemies = [];
+    let warnings = [];
+    let englishDetected = false;
+
+    raw_inputs.forEach(r => {
+        let res = resolve_input(r);
+        if (res.name) {
+            enemies.push(res.name);
+            if (res.isEng) englishDetected = true;
+        } else {
+            warnings.push(`'${r}' 는 제대로 된 이름이 아니에요 ;ㅅ; `);
+        }
+    });
+
+    // 영타 안내 및 경고 출력
+    infoEl.innerText = englishDetected ? "영문 입력을 한글로 변환하여 검색 중입니다." : "";
+    warningEl.innerHTML = warnings.join("<br>");
+
+    currentEnemies = enemies;
+    render();
+});
+
+// 필터 버튼: 선택 상태 갱신 후 같은 enemies로 다시 render
+filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        currentFilter = btn.dataset.filter;
+        filterBtns.forEach(b => b.classList.toggle('active', b === btn));
+        render();
+    });
+});
+
+// 페이지 시작: 저장분 즉시 표시 + 구글시트 최신 받아오기
+initData();
+</script>
+</body>
+</html>
